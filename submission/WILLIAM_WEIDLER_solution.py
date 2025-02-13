@@ -30,19 +30,20 @@ def parse_ptbxl_data() -> pd.DataFrame:
     """
     df = pd.read_csv("ptbxl_sample.csv", usecols=["ecg_id", "filename_lr", "scp_codes"])
     resource = pd.read_csv("scp_statements.csv")
+    resource.rename(columns={"Unnamed: 0": "scp_code"}, inplace=True)
     resource = resource.dropna(subset=["diagnostic_class"])
-    first_column = resource.iloc[:, 0]
-    scp_codes = df["scp_codes"]
+    df["scp_codes"] = df["scp_codes"].apply(ast.literal_eval)
+
     diagnostic_class = []
-    for code in scp_codes:
-        code = ast.literal_eval(code)
+    for code in df["scp_codes"]:
         new_append = []
-        for i in code:
-            if i in first_column.values:
-                new_append.append(
-                    resource[resource.iloc[:, 0] == i].diagnostic_class.values[0]
-                )
-        diagnostic_class.append(new_append)
+        for i in code.keys():
+            match = resource[resource["scp_code"] == i]
+            if not match.empty:
+                if match["diagnostic_class"].values[0] not in new_append:
+                    new_append.append(match["diagnostic_class"].values[0])
+        diagnostic_class.append(list(new_append))
+
     result_df = pd.DataFrame(
         {
             "ecg_id": df["ecg_id"],
@@ -51,7 +52,6 @@ def parse_ptbxl_data() -> pd.DataFrame:
         }
     )
     result_df = result_df[result_df["diagnostic_class"].apply(lambda x: len(x) > 0)]
-    print(result_df)
     return result_df
 
 
@@ -72,13 +72,32 @@ def create_dataset(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
     - data_x: array should contain the ECG data with shape [num_samples, signal_length(1000), num_channels(12)].
     - data_y: array should contain the labels with shape   [num_samples, num_classes(5)].
     """
-    # TODO: Implement this function
 
     # you can read the raw ECG signal with this function:
     # ECG_signal, _ = wfdb.rdsamp("filename_lr")
 
-    # return data_x, data_y
-    return
+    data_x = []
+    data_y = []
+    for index, row in df.iterrows():
+        ECG_signal, _ = wfdb.rdsamp(row["filename_lr"])
+        data_x.append(ECG_signal)
+        label = [0, 0, 0, 0, 0]
+        for i in row["diagnostic_class"]:
+            if i == "NORM":
+                label[0] = 1
+            elif i == "MI":
+                label[1] = 1
+            elif i == "STTC":
+                label[2] = 1
+            elif i == "CD":
+                label[3] = 1
+            elif i == "HYP":
+                label[4] = 1
+        data_y.append(label)
+    data_x = np.array(data_x)
+    data_y = np.array(data_y)
+
+    return data_x, data_y
 
 
 # Step-2:
@@ -95,11 +114,38 @@ def data_preprocessing(
         - xmin: represents the minimum value of the channel.
     After normalization, the values will be scaled to range from 0 to 1.
     """
+    data_x_normalized = []
+    data_y_normalized = []
 
-    # TODO: Implement this function.
+    for i in range(len(data_x)):
+        for j in range(12):  # Assuming 12 channels
+            channel_data = data_x[i][:, j]
 
-    # return data_x_normalized, data_y_normalized
-    return
+            # Handle missing values using linear interpolation (if possible)
+            if np.isnan(channel_data).any():
+                valid_indices = ~np.isnan(channel_data)
+                channel_data = np.interp(
+                    np.arange(len(channel_data)),
+                    np.where(valid_indices)[0],
+                    channel_data[valid_indices],
+                )
+
+            # Detect outliers using percentiles (3rd and 97th)
+            lower_bound = np.percentile(channel_data, 3)
+            upper_bound = np.percentile(channel_data, 97)
+            channel_data = np.clip(channel_data, lower_bound, upper_bound)
+
+            # Min-max normalization
+            min_val, max_val = np.min(channel_data), np.max(channel_data)
+            if max_val != min_val:  # Avoid division by zero
+                channel_data = (channel_data - min_val) / (max_val - min_val)
+
+            data_x[i][:, j] = channel_data
+
+        data_x_normalized.append(data_x[i])
+        data_y_normalized.append(data_y[i])
+
+    return np.array(data_x_normalized), np.array(data_y_normalized)
 
 
 # Step-3
@@ -109,15 +155,19 @@ def split_data(
     """
     Implement this function to split the dataset into train, test, and validation sets at a 7:2:1 ratio.
     """
-    # TODO: Implement this function
+    data_x = np.array(data_x)
+    data_y = np.array(data_y)
+    train_dataset = {
+        "data_x": data_x[: int(len(data_x) * 0.7)],
+        "data_y": data_y[: int(len(data_y) * 0.7)],
+    }
+    val_dataset = {
+        "data_x": data_x[int(len(data_x) * 0.7) : int(len(data_x) * 0.9)],
+        "data_y": data_y[int(len(data_y) * 0.7) : int(len(data_y) * 0.9)],
+    }
+    test_dataset = {
+        "data_x": data_x[int(len(data_x) * 0.9) :],
+        "data_y": data_y[int(len(data_y) * 0.9) :],
+    }
 
-    # train_dataset = {"data_x": np.ndarray,
-    #                  "data_y": np.ndarray}
-    # val_dataset   = {"data_x": np.ndarray,
-    #                  "data_y": np.ndarray}
-    # test_dataset  = {"data_x": np.ndarray,
-    #                  "data_y": np.ndarray}
-    # return train_dataset, val_dataset, test_dataset.
-
-    # return train_dataset, val_dataset, test_dataset
-    return
+    return train_dataset, val_dataset, test_dataset
