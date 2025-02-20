@@ -4,8 +4,6 @@ import numpy as np
 import wfdb
 from typing import Dict
 
-"""PLEASE RENAME your solution TO FIRSTNAME_LASTNAME_solution.py"""
-
 
 # Step-1, part 1
 def parse_ptbxl_data() -> pd.DataFrame:
@@ -40,7 +38,10 @@ def parse_ptbxl_data() -> pd.DataFrame:
         for i in code.keys():
             match = resource[resource["scp_code"] == i]
             if not match.empty:
-                if match["diagnostic_class"].values[0] not in new_append:
+                if (
+                    match["diagnostic_class"].values[0] not in new_append
+                    and code[i] != 0.0
+                ):
                     new_append.append(match["diagnostic_class"].values[0])
         diagnostic_class.append(list(new_append))
 
@@ -118,10 +119,8 @@ def data_preprocessing(
     data_y_normalized = []
 
     for i in range(len(data_x)):
-        for j in range(12):  # Assuming 12 channels
+        for j in range(12):
             channel_data = data_x[i][:, j]
-
-            # Handle missing values using linear interpolation (if possible)
             if np.isnan(channel_data).any():
                 valid_indices = ~np.isnan(channel_data)
                 channel_data = np.interp(
@@ -129,15 +128,11 @@ def data_preprocessing(
                     np.where(valid_indices)[0],
                     channel_data[valid_indices],
                 )
-
-            # Detect outliers using percentiles (3rd and 97th)
             lower_bound = np.percentile(channel_data, 3)
             upper_bound = np.percentile(channel_data, 97)
             channel_data = np.clip(channel_data, lower_bound, upper_bound)
-
-            # Min-max normalization
             min_val, max_val = np.min(channel_data), np.max(channel_data)
-            if max_val != min_val:  # Avoid division by zero
+            if max_val != min_val:
                 channel_data = (channel_data - min_val) / (max_val - min_val)
 
             data_x[i][:, j] = channel_data
